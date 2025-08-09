@@ -2,23 +2,23 @@
 <html>
 <head>
     <title>My Resume</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
     <style>
-        body { margin: 0; padding: 0; }
-        iframe { width: 100%; height: 100vh; border: none; }
+        #pdf-viewer { width: 100%; height: 100vh; border: none; }
     </style>
-    <script>
-        // Mask the URL after the PDF loads
-        window.onload = function() {
-            const iframe = document.querySelector('iframe');
-            iframe.onload = function() {
-                setTimeout(() => {
-                    window.history.replaceState({}, '', '/');
-                }, 100); // Short delay to ensure PDF loads
-            };
-        };
-    </script>
 </head>
 <body>
-    <iframe src="resume.pdf"></iframe>
+    <canvas id="pdf-viewer"></canvas>
+    <script>
+        pdfjsLib.getDocument('resume.pdf').promise.then(pdf => {
+            pdf.getPage(1).then(page => {
+                const viewport = page.getViewport({ scale: 1.5 });
+                const canvas = document.getElementById('pdf-viewer');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                page.render({ canvasContext: canvas.getContext('2d'), viewport });
+            });
+        });
+    </script>
 </body>
 </html>
