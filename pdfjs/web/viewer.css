@@ -13,13 +13,6 @@
  * limitations under the License.
  */
 
-#toolbarViewer {
-  background: #2d3748 !important; /* Dark toolbar */
-}
-#viewerContainer {
-  background: #f7fafc !important; /* Light background */
-}
-
 .messageBar{
   --closing-button-icon:url(images/messageBar_closingButton.svg);
   --message-bar-close-button-color:var(--text-primary-color);
