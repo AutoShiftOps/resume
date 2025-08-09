@@ -7,8 +7,15 @@
         iframe { width: 100%; height: 100vh; border: none; }
     </style>
     <script>
-        // Hide PDF URL using HTML5 History API
-        history.replaceState({}, "", "/");
+        // Mask the URL after the PDF loads
+        window.onload = function() {
+            const iframe = document.querySelector('iframe');
+            iframe.onload = function() {
+                setTimeout(() => {
+                    window.history.replaceState({}, '', '/');
+                }, 100); // Short delay to ensure PDF loads
+            };
+        };
     </script>
 </head>
 <body>
