@@ -2,13 +2,13 @@
 <html>
 <head>
     <title>AutoShiftOps Resume</title>
-    <link rel="preload" href="/pdfjs/build/pdf.worker.js" as="script">
-    <link rel="preload" href="/resume.pdf" as="document">
+    <link rel="preload" href="pdfjs/build/pdf.worker.js" as="script">
+    <link rel="preload" href="resume.pdf" as="document">
     <script>
         // Dynamically load PDF viewer to avoid CORS/iframe issues
         window.onload = function() {
             const iframe = document.createElement('iframe');
-            iframe.src = '/pdfjs/web/viewer.html?file=/resume.pdf';
+            iframe.src = 'pdfjs/web/viewer.html?file=resume.pdf';
             iframe.style.cssText = `
                 width: 100%;
                 height: 100vh;
