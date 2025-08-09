@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Resume</title>
   <style>
     html, body { margin: 0; height: 100%; }
@@ -9,15 +10,6 @@
   </style>
 </head>
 <body>
-  <iframe id="pdfFrame"></iframe>
-
-  <script>
-    // Adjust this path
-    const pdfPath = '/resume/docs/resume.pdf';
-    const viewerPath = 'https://mozilla.github.io/pdf.js/web/viewer.html';
-
-    document.getElementById('pdfFrame').src =
-      viewerPath + '?file=' + encodeURIComponent(pdfPath);
-  </script>
+  <iframe src="./web/viewer.html?file=./resume.pdf"></iframe>
 </body>
 </html>
