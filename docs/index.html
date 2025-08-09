@@ -2,24 +2,27 @@
 <html>
 <head>
     <title>My Resume</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <meta name="description" content="Sajja Sudhakar Rao - Senior DevOps Engineer">
     <style>
-        #pdf-viewer { width: 100%; height: 100vh; border: none; }
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            padding: 2rem;
+        }
+        a {
+            color: #0366d6;
+            text-decoration: none;
+            font-weight: bold;
+            border: 2px solid #0366d6;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+        }
+        a:hover { background: #f0f0f0; }
     </style>
 </head>
 <body>
-    <canvas id="pdf-viewer"></canvas>
-    <script>
-        pdfjsLib.getDocument('resume.pdf').promise.then(pdf => {
-            pdf.getPage(1).then(page => {
-                const viewport = page.getViewport({ scale: 1.5 });
-                const canvas = document.getElementById('pdf-viewer');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                page.render({ canvasContext: canvas.getContext('2d'), viewport });
-            });
-        });
-    </script>
+    <h1>Welcome to My Portfolio</h1>
+    <p>Click below to view/download my resume:</p>
+    <a href="resume.pdf" download>Download Resume (PDF)</a>
 </body>
 </html>
