@@ -6,6 +6,10 @@
         body { margin: 0; padding: 0; }
         iframe { width: 100%; height: 100vh; border: none; }
     </style>
+    <script>
+        // Hide PDF URL using HTML5 History API
+        history.replaceState({}, "", "/");
+    </script>
 </head>
 <body>
     <iframe src="resume.pdf"></iframe>
