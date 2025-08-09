@@ -1,7 +1,34 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta http-equiv="refresh" content="0; url=/pdfjs/web/viewer.html?file=/resume.pdf">
+    <title>AutoShiftOps Resume</title>
+    <link rel="preload" href="/pdfjs/build/pdf.worker.js" as="script">
+    <link rel="preload" href="/resume.pdf" as="document">
+    <script>
+        // Dynamically load PDF viewer to avoid CORS/iframe issues
+        window.onload = function() {
+            const iframe = document.createElement('iframe');
+            iframe.src = '/pdfjs/web/viewer.html?file=/resume.pdf';
+            iframe.style.cssText = `
+                width: 100%;
+                height: 100vh;
+                border: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+            `;
+            document.body.appendChild(iframe);
+            history.replaceState({}, '', '/'); // Clean URL
+        };
+    </script>
+    <style>
+        body { margin: 0; overflow: hidden; }
+    </style>
 </head>
-<body></body>
+<body>
+    <!-- Fallback for non-JS users -->
+    <noscript>
+        <a href="/resume.pdf" download>Download Resume</a>
+    </noscript>
+</body>
 </html>
