@@ -1,34 +1,36 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AutoShiftOps Resume</title>
-    <link rel="preload" href="pdfjs/build/pdf.worker.js" as="script">
-    <link rel="preload" href="resume.pdf" as="document">
     <script>
-        // Dynamically load PDF viewer to avoid CORS/iframe issues
-        window.onload = function() {
-            const iframe = document.createElement('iframe');
-            iframe.src = 'pdfjs/web/viewer.html?file=resume.pdf';
-            iframe.style.cssText = `
-                width: 100%;
-                height: 100vh;
-                border: none;
-                position: fixed;
-                top: 0;
-                left: 0;
-            `;
-            document.body.appendChild(iframe);
-            history.replaceState({}, '', '/resume'); // Clean URL
-        };
+        // Dynamic viewer loader with failover
+        document.addEventListener('DOMContentLoaded', () => {
+            const pdfViewer = document.createElement('iframe');
+            pdfViewer.src = '/resume/pdfjs/web/viewer.html?file=/resume/resume.pdf';
+            pdfViewer.style = 'width:100%; height:100vh; border:none; position:fixed; top:0; left:0;';
+            pdfViewer.onerror = () => {
+                document.body.innerHTML = `
+                    <h1>Resume Viewer Failed to Load</h1>
+                    <a href="/resume/resume.pdf" download>Download PDF Instead</a>
+                `;
+            };
+            document.body.appendChild(pdfViewer);
+            window.history.replaceState({}, '', '/resume/');
+        });
     </script>
     <style>
-        body { margin: 0; overflow: hidden; }
+        body { margin: 0; font-family: Arial; }
+        .fallback { padding: 2rem; text-align: center; }
     </style>
 </head>
 <body>
-    <!-- Fallback for non-JS users -->
     <noscript>
-        <a href="resume.pdf" download>Download Resume</a>
+        <div class="fallback">
+            <h1>JavaScript Required</h1>
+            <a href="/resume/resume.pdf" download>Download Resume (PDF)</a>
+        </div>
     </noscript>
 </body>
 </html>
