@@ -4,15 +4,9 @@ Stored Procedure Analyzer v5
 - Physical tables ONLY — temp (#) and CTEs fully excluded from all output
 - Alias collision detection: same alias name used for different tables in a single statement
 - Alias scoped per-statement, not globally
+- Single-table, no-alias SELECT/UPDATE/INSERT: unqualified columns attached to that table
 - Schema Breakdown tab: Schema -> Tables -> Columns
 - Deterministic regex engine, zero LLM
-
-Usage:
-    python sp_analyzer_v5.py                          # paste SP(s)
-    python sp_analyzer_v5.py my_sp.sql                # from file
-    python sp_analyzer_v5.py sp1.sql sp2.sql          # multiple files
-    python sp_analyzer_v5.py --dialect tsql my.sql    # force dialect
-    python sp_analyzer_v5.py --output report.xlsx my.sql
 """
 
 import re
@@ -26,8 +20,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-
-# Palette
 C_HEADER_BG = "1F3864"
 C_HEADER_FG = "FFFFFF"
 C_SUBHDR_BG = "2E75B6"
@@ -176,10 +168,6 @@ def parse_table_ref(raw: str):
 
 
 def build_alias_map(stmt: str):
-    """Build alias->full_key map for ONE statement and detect duplicate alias use.
-
-    Returns (alias_map, alias_issues).
-    """
     alias_map = {}
     alias_issues = []
     pat = re.compile(
@@ -257,6 +245,9 @@ def extract_all(sql: str):
         if stmt_issues:
             alias_issues.extend(stmt_issues)
 
+        stmt_tables = set()
+        stmt_unresolved = set()
+
         for alias, full_key in alias_map.items():
             if full_key in physical:
                 physical[full_key]["aliases"].add(alias)
@@ -274,10 +265,12 @@ def extract_all(sql: str):
                 ):
                     continue
                 register(full, schema, base, op)
+                stmt_tables.add(full)
                 for a, fk in alias_map.items():
                     if fk == full and full in physical:
                         physical[full]["aliases"].add(a)
 
+        # qualified columns
         for m in re.finditer(r"\b([\w\[\]]+)\.([\w\[\]]+)\b", stmt):
             prefix = strip_name(m.group(1)).upper()
             col = strip_name(m.group(2)).upper()
@@ -287,7 +280,6 @@ def extract_all(sql: str):
                 or not re.match(r"^[A-Z_][A-Z0-9_]*$", col)
             ):
                 continue
-            # Skip pure schema.table references (where prefix and col match a known schema/base pair)
             is_schema_table_ref = any(
                 info.get("schema") == prefix and info.get("base") == col
                 for info in physical.values()
@@ -304,31 +296,46 @@ def extract_all(sql: str):
             if target_key and target_key in physical:
                 physical[target_key]["columns"].add(col)
 
+        # SELECT list (unqualified)
         for block_m in re.finditer(r"\bSELECT\b(.*?)\bFROM\b", stmt, re.IGNORECASE | re.DOTALL):
             block = re.sub(r"\(.*?\)", "", block_m.group(1), flags=re.DOTALL)
-            for token in re.split(r"[,\s]+", block):
+            for token in re.findall(r"\[[^]]+\]|[^,\s]+", block):
                 token = strip_name(token.split(".")[-1]).upper()
                 if (
                     token
+                    and " " not in token
                     and token not in SKIP_WORDS
                     and token != "*"
                     and re.match(r"^[A-Z_][A-Z0-9_]*$", token)
                 ):
-                    physical.setdefault(
-                        "__UNRESOLVED__",
-                        {
-                            "schema": "",
-                            "base": "__UNRESOLVED__",
-                            "ops": set(),
-                            "aliases": set(),
-                            "columns": set(),
-                        },
-                    )
-                    physical["__UNRESOLVED__"]["columns"].add(token)
+                    stmt_unresolved.add(token)
 
+        # SET col =
         for m in re.finditer(r"\bSET\s+([\w\[\]]+)\s*=", stmt, re.IGNORECASE):
             col = strip_name(m.group(1)).upper()
             if col not in SKIP_WORDS:
+                stmt_unresolved.add(col)
+
+        # INSERT col list
+        for m in re.finditer(r"\bINSERT\s+INTO\s+[\w\.\[\]]+\s*\((.*?)\)", stmt, re.IGNORECASE | re.DOTALL):
+            for c in m.group(1).split(","):
+                c = strip_name(c).upper().strip()
+                if c and re.match(r"^[A-Z_][A-Z0-9_]*$", c) and c not in SKIP_WORDS:
+                    stmt_unresolved.add(c)
+
+        # Attach unresolved tokens for this statement
+        if stmt_unresolved:
+            if len(stmt_tables) == 1:
+                only_table = next(iter(stmt_tables))
+                physical.setdefault(only_table, {
+                    "schema": parse_table_ref(only_table)[0],
+                    "base": parse_table_ref(only_table)[1],
+                    "ops": set(),
+                    "aliases": set(),
+                    "columns": set(),
+                })
+                physical[only_table]["columns"].update(stmt_unresolved)
+            else:
                 physical.setdefault(
                     "__UNRESOLVED__",
                     {
@@ -339,33 +346,9 @@ def extract_all(sql: str):
                         "columns": set(),
                     },
                 )
-                physical["__UNRESOLVED__"]["columns"].add(col)
-
-        for m in re.finditer(r"\bINSERT\s+INTO\s+[\w\.\[\]]+\s*\((.*?)\)", stmt, re.IGNORECASE | re.DOTALL):
-            for c in m.group(1).split(","):
-                c = strip_name(c).upper().strip()
-                if c and re.match(r"^[A-Z_][A-Z0-9_]*$", c) and c not in SKIP_WORDS:
-                    physical.setdefault(
-                        "__UNRESOLVED__",
-                        {
-                            "schema": "",
-                            "base": "__UNRESOLVED__",
-                            "ops": set(),
-                            "aliases": set(),
-                            "columns": set(),
-                        },
-                    )
-                    physical["__UNRESOLVED__"]["columns"].add(c)
-
-    # After processing all statements, if there is exactly one physical table
-    # and there are unresolved columns, attach them to that single table.
-    real_tables = [k for k in physical.keys() if k != "__UNRESOLVED__"]
-    if len(real_tables) == 1 and "__UNRESOLVED__" in physical:
-        only_table = real_tables[0]
-        physical[only_table]["columns"].update(physical["__UNRESOLVED__"]["columns"])
+                physical["__UNRESOLVED__"]["columns"].update(stmt_unresolved)
 
     mapped = set()
-
     for k, info in physical.items():
         if k != "__UNRESOLVED__":
             mapped.update(info["columns"])
@@ -512,7 +495,7 @@ def build_excel(all_results, output_path):
                         schema,
                         base,
                         col,
-                        "alias.col / table.col",
+                        "alias.col / table.col",  # generic description
                         ops,
                     ]
                     for ci, v in enumerate(vals, 1):
@@ -644,7 +627,7 @@ def build_excel(all_results, output_path):
     notes = [
         ("", ""),
         ("Scope", "Physical schema objects only — #temp tables and CTEs fully excluded"),
-        ("Alias Collision", "Aliases resolved per-statement; duplicate alias (same name, different tables) collected in alias_issues list"),
+        ("Alias Collision", "Duplicate alias (same name, different tables) collected in alias_issues list"),
         ("Unresolved Cols", "Column found in SQL but table could not be determined from context"),
         ("Dynamic SQL WARN", "EXEC() / sp_executesql contents cannot be statically analyzed — review manually"),
         ("Schema Breakdown", "Groups all physical tables by schema with columns and procedures that reference them"),
