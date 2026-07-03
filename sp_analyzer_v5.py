@@ -8,6 +8,7 @@ Stored Procedure Analyzer v5
 - Predicates (CASE/WHERE/ON, simple col = ...) also counted as column usage
 - Schema Breakdown tab: Schema -> Tables -> Columns
 - Deterministic regex engine, zero LLM
+- LookupValue exception: keep unqualified tokens under table-not-determined behavior
 """
 
 import re
@@ -44,25 +45,25 @@ def thin_border():
     return Border(left=s, right=s, top=s, bottom=s)
 
 def style_header(cell, bg=C_HEADER_BG, fg=C_HEADER_FG, size=10):
-    cell.font      = Font(bold=True, color=fg, name="Arial", size=size)
-    cell.fill      = PatternFill("solid", fgColor=bg)
+    cell.font = Font(bold=True, color=fg, name="Arial", size=size)
+    cell.fill = PatternFill("solid", fgColor=bg)
     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    cell.border    = thin_border()
+    cell.border = thin_border()
 
 def style_data(cell, row_idx):
-    cell.fill      = PatternFill("solid", fgColor=C_ALT_ROW if row_idx % 2 == 0 else C_WHITE)
-    cell.font      = Font(name="Arial", size=10)
+    cell.fill = PatternFill("solid", fgColor=C_ALT_ROW if row_idx % 2 == 0 else C_WHITE)
+    cell.font = Font(name="Arial", size=10)
     cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-    cell.border    = thin_border()
+    cell.border = thin_border()
 
 def style_schema_group(cell):
-    cell.fill      = PatternFill("solid", fgColor=C_SCHEMA_BG)
-    cell.font      = Font(bold=True, color=C_SCHEMA_FG, name="Arial", size=11)
+    cell.fill = PatternFill("solid", fgColor=C_SCHEMA_BG)
+    cell.font = Font(bold=True, color=C_SCHEMA_FG, name="Arial", size=11)
     cell.alignment = Alignment(horizontal="left", vertical="center")
-    cell.border    = thin_border()
+    cell.border = thin_border()
 
 def op_color(ops):
-    for op in ["DELETE","TRUNCATE","MERGE","UPDATE","INSERT","SELECT"]:
+    for op in ["DELETE", "TRUNCATE", "MERGE", "UPDATE", "INSERT", "SELECT"]:
         if op in ops:
             return OP_COLORS.get(op, "404040")
     return "404040"
@@ -157,8 +158,8 @@ def build_alias_map(stmt: str):
     alias_issues = []
     pat = re.compile(
         r"(?:FROM|JOIN|UPDATE|MERGE\s+(?:INTO\s+)?)\s+"
-        r"((?:[\w\[\]]+\.)*[\w\[\]]+)"      # table ref
-        r"\s+(?:AS\s+)?([A-Za-z_]\w*)"      # alias
+        r"((?:[\w\[\]]+\.)*[\w\[\]]+)"
+        r"\s+(?:AS\s+)?([A-Za-z_]\w*)"
         r"(?=\s|\(|$|ON\b|SET\b|USING\b)",
         re.IGNORECASE,
     )
@@ -263,6 +264,7 @@ def extract_all(sql: str):
                 or not re.match(r"^[A-Z_][A-Z0-9_]*$", col)
             ):
                 continue
+            # skip schema.table patterns (CLASSIFICATION.LINKCLASSDFAPROT10SCH)
             is_schema_table_ref = any(
                 info.get("schema") == prefix and info.get("base") == col
                 for info in physical.values()
@@ -320,14 +322,29 @@ def extract_all(sql: str):
         if stmt_unresolved:
             if len(stmt_tables) == 1:
                 only_table = next(iter(stmt_tables))
-                physical.setdefault(only_table, {
-                    "schema": parse_table_ref(only_table)[0],
-                    "base": parse_table_ref(only_table)[1],
-                    "ops": set(),
-                    "aliases": set(),
-                    "columns": set(),
-                })
-                physical[only_table]["columns"].update(stmt_unresolved)
+                _, base, _ = parse_table_ref(only_table)
+                # Special case: LookupValue statements keep unqualified tokens under table-not-determined
+                if base == "LOOKUPVALUE":
+                    physical.setdefault(
+                        "__UNRESOLVED__",
+                        {
+                            "schema": "",
+                            "base": "__UNRESOLVED__",
+                            "ops": set(),
+                            "aliases": set(),
+                            "columns": set(),
+                        },
+                    )
+                    physical["__UNRESOLVED__"]["columns"].update(stmt_unresolved)
+                else:
+                    physical.setdefault(only_table, {
+                        "schema": parse_table_ref(only_table)[0],
+                        "base": parse_table_ref(only_table)[1],
+                        "ops": set(),
+                        "aliases": set(),
+                        "columns": set(),
+                    })
+                    physical[only_table]["columns"].update(stmt_unresolved)
             else:
                 physical.setdefault(
                     "__UNRESOLVED__",
@@ -341,6 +358,7 @@ def extract_all(sql: str):
                 )
                 physical["__UNRESOLVED__"]["columns"].update(stmt_unresolved)
 
+    # clean up unresolved bucket
     mapped = set()
     for k, info in physical.items():
         if k != "__UNRESOLVED__":
@@ -358,6 +376,7 @@ def extract_all(sql: str):
 def build_excel(all_results, output_path):
     wb = Workbook()
 
+    # Summary
     ws = wb.active
     ws.title = "Summary"
     ws.sheet_view.showGridLines = False
@@ -365,8 +384,8 @@ def build_excel(all_results, output_path):
     ws.merge_cells("A1:G1")
     c = ws["A1"]
     c.value = "Stored Procedure Analyzer v5 — Physical Tables Report"
-    c.font  = Font(bold=True, name="Arial", size=14, color=C_HEADER_FG)
-    c.fill  = PatternFill("solid", fgColor=C_HEADER_BG)
+    c.font = Font(bold=True, name="Arial", size=14, color=C_HEADER_FG)
+    c.fill = PatternFill("solid", fgColor=C_HEADER_BG)
     c.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 34
 
@@ -377,13 +396,11 @@ def build_excel(all_results, output_path):
         f"Procedures: {len(all_results)}    |    "
         f"Note: Temp tables and CTEs excluded — physical schema objects only"
     )
-    c.font      = Font(italic=True, name="Arial", size=9, color="595959")
+    c.font = Font(italic=True, name="Arial", size=9, color="595959")
     c.alignment = Alignment(horizontal="center")
 
-    hdrs = [
-        "#", "Procedure Name", "Source File", "Dialect",
-        "Physical Tables", "Columns Resolved", "Dynamic SQL?",
-    ]
+    hdrs = ["#", "Procedure Name", "Source File", "Dialect",
+            "Physical Tables", "Columns Resolved", "Dynamic SQL?"]
     for ci, h in enumerate(hdrs, 1):
         style_header(ws.cell(row=4, column=ci, value=h))
     ws.row_dimensions[4].height = 22
@@ -411,13 +428,12 @@ def build_excel(all_results, output_path):
     for i, w in enumerate([5, 35, 25, 20, 16, 18, 14], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
+    # Physical Tables
     wt = wb.create_sheet("Physical Tables")
     wt.sheet_view.showGridLines = False
 
-    hdrs = [
-        "Procedure", "Schema", "Table Name", "Full Reference",
-        "Operation(s)", "Aliases Used",
-    ]
+    hdrs = ["Procedure", "Schema", "Table Name", "Full Reference",
+            "Operation(s)", "Aliases Used"]
     for ci, h in enumerate(hdrs, 1):
         style_header(wt.cell(row=1, column=ci, value=h))
 
@@ -442,13 +458,12 @@ def build_excel(all_results, output_path):
     for i, w in enumerate([32, 14, 26, 30, 26, 22], 1):
         wt.column_dimensions[get_column_letter(i)].width = w
 
+    # Columns Detail
     wc = wb.create_sheet("Columns Detail")
     wc.sheet_view.showGridLines = False
 
-    hdrs = [
-        "Procedure", "Schema", "Table Name", "Column Name",
-        "Resolved Via", "Operation(s)",
-    ]
+    hdrs = ["Procedure", "Schema", "Table Name", "Column Name",
+            "Resolved Via", "Operation(s)"]
     for ci, h in enumerate(hdrs, 1):
         style_header(wc.cell(row=1, column=ci, value=h))
 
@@ -495,6 +510,7 @@ def build_excel(all_results, output_path):
                         style_data(c, row)
                     row += 1
 
+        # unresolved bucket
         unres_info = physical.get("__UNRESOLVED__")
         if unres_info:
             for col in sorted(unres_info["columns"]):
@@ -518,14 +534,15 @@ def build_excel(all_results, output_path):
     for i, w in enumerate([32, 14, 26, 28, 22, 22], 1):
         wc.column_dimensions[get_column_letter(i)].width = w
 
+    # Schema Breakdown
     ws4 = wb.create_sheet("Schema Breakdown")
     ws4.sheet_view.showGridLines = False
 
     ws4.merge_cells("A1:E1")
     c = ws4["A1"]
     c.value = "Schema Breakdown — Physical Tables & Columns Grouped by Schema"
-    c.font  = Font(bold=True, name="Arial", size=13, color=C_HEADER_FG)
-    c.fill  = PatternFill("solid", fgColor=C_HEADER_BG)
+    c.font = Font(bold=True, name="Arial", size=13, color=C_HEADER_FG)
+    c.fill = PatternFill("solid", fgColor=C_HEADER_BG)
     c.alignment = Alignment(horizontal="center", vertical="center")
     ws4.row_dimensions[1].height = 30
 
@@ -600,6 +617,7 @@ def build_excel(all_results, output_path):
     for i, w in enumerate([16, 26, 28, 26, 45], 1):
         ws4.column_dimensions[get_column_letter(i)].width = w
 
+    # Legend
     wl = wb.create_sheet("Legend")
     wl.sheet_view.showGridLines = False
     wl.merge_cells("A1:D1")
