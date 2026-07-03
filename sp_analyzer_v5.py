@@ -287,6 +287,14 @@ def extract_all(sql: str):
                 or not re.match(r"^[A-Z_][A-Z0-9_]*$", col)
             ):
                 continue
+            # Skip pure schema.table references (where prefix and col match a known schema/base pair)
+            is_schema_table_ref = any(
+                info.get("schema") == prefix and info.get("base") == col
+                for info in physical.values()
+                if info.get("base") != "__UNRESOLVED__"
+            )
+            if is_schema_table_ref:
+                continue
             target_key = alias_map.get(prefix)
             if not target_key:
                 for k in physical:
