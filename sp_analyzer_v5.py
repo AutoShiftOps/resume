@@ -5,6 +5,7 @@ Stored Procedure Analyzer v5
 - Alias collision detection: same alias name used for different tables in a single statement
 - Alias scoped per-statement, not globally
 - Single-table, no-alias SELECT/UPDATE/INSERT: unqualified columns attached to that table
+- Predicates (CASE/WHERE/ON, simple col = ...) also counted as column usage
 - Schema Breakdown tab: Schema -> Tables -> Columns
 - Deterministic regex engine, zero LLM
 """
@@ -38,11 +39,9 @@ OP_COLORS = {
     "TRUNCATE": "420000",
 }
 
-
 def thin_border():
     s = Side(style="thin", color="BFBFBF")
     return Border(left=s, right=s, top=s, bottom=s)
-
 
 def style_header(cell, bg=C_HEADER_BG, fg=C_HEADER_FG, size=10):
     cell.font      = Font(bold=True, color=fg, name="Arial", size=size)
@@ -50,13 +49,11 @@ def style_header(cell, bg=C_HEADER_BG, fg=C_HEADER_FG, size=10):
     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     cell.border    = thin_border()
 
-
 def style_data(cell, row_idx):
     cell.fill      = PatternFill("solid", fgColor=C_ALT_ROW if row_idx % 2 == 0 else C_WHITE)
     cell.font      = Font(name="Arial", size=10)
     cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     cell.border    = thin_border()
-
 
 def style_schema_group(cell):
     cell.fill      = PatternFill("solid", fgColor=C_SCHEMA_BG)
@@ -64,25 +61,20 @@ def style_schema_group(cell):
     cell.alignment = Alignment(horizontal="left", vertical="center")
     cell.border    = thin_border()
 
-
 def op_color(ops):
     for op in ["DELETE","TRUNCATE","MERGE","UPDATE","INSERT","SELECT"]:
         if op in ops:
             return OP_COLORS.get(op, "404040")
     return "404040"
 
-
 def strip_name(n):
     return re.sub(r"[\[\]\"`]", "", str(n)).strip()
-
 
 def is_temp(name):
     return str(name).lstrip("[").startswith("#")
 
-
 def is_var(name):
     return str(name).startswith("@")
-
 
 def detect_dialect(sql: str) -> str:
     s = sql.upper()
@@ -97,7 +89,6 @@ def detect_dialect(sql: str) -> str:
     if re.search(r"\$\$", sql):
         return "PostgreSQL"
     return "Auto-detected"
-
 
 def split_procedures(sql: str):
     pat = re.compile(
@@ -115,24 +106,20 @@ def split_procedures(sql: str):
         procs.append((name, sql[start:end]))
     return procs
 
-
 def clean_sql(sql: str) -> str:
     sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
     sql = re.sub(r"--[^\n]*", " ", sql)
     sql = re.sub(r"\s+", " ", sql)
     return sql.strip()
 
-
 STMT_KEYWORDS = re.compile(
     r"(?=\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE|TRUNCATE)\b)",
     re.IGNORECASE,
 )
 
-
 def split_statements(sql: str):
     parts = STMT_KEYWORDS.split(sql)
     return [p.strip() for p in parts if p.strip()]
-
 
 SKIP_WORDS = {
     "SELECT","WHERE","SET","ON","AND","OR","NOT","IN","AS","WITH","BY","HAVING",
@@ -152,7 +139,6 @@ SKIP_WORDS = {
     "MATCHED","BY",
 }
 
-
 def parse_table_ref(raw: str):
     raw = strip_name(raw).strip()
     parts = [p for p in raw.split(".") if p]
@@ -166,14 +152,13 @@ def parse_table_ref(raw: str):
         full = base
     return schema, base, full
 
-
 def build_alias_map(stmt: str):
     alias_map = {}
     alias_issues = []
     pat = re.compile(
         r"(?:FROM|JOIN|UPDATE|MERGE\s+(?:INTO\s+)?)\s+"
         r"((?:[\w\[\]]+\.)*[\w\[\]]+)"      # table ref
-        r"\s+(?:AS\s+)?([A-Za-z_]\w*)"          # alias
+        r"\s+(?:AS\s+)?([A-Za-z_]\w*)"      # alias
         r"(?=\s|\(|$|ON\b|SET\b|USING\b)",
         re.IGNORECASE,
     )
@@ -197,7 +182,6 @@ def build_alias_map(stmt: str):
             alias_map[alias] = full
     return alias_map, alias_issues
 
-
 TABLE_OP_PATTERNS = [
     (r"\bFROM\s+((?:[\w\[\]]+\.)*[\w\[\]]+)", "SELECT"),
     (r"\bINNER\s+JOIN\s+((?:[\w\[\]]+\.)*[\w\[\]]+)", "SELECT"),
@@ -213,7 +197,6 @@ TABLE_OP_PATTERNS = [
     (r"\bTRUNCATE\s+TABLE\s+((?:[\w\[\]]+\.)*[\w\[\]]+)", "TRUNCATE"),
     (r"\bUSING\s+((?:[\w\[\]]+\.)*[\w\[\]]+)", "SELECT"),
 ]
-
 
 def extract_all(sql: str):
     clean = clean_sql(sql)
@@ -300,6 +283,10 @@ def extract_all(sql: str):
         for block_m in re.finditer(r"\bSELECT\b(.*?)\bFROM\b", stmt, re.IGNORECASE | re.DOTALL):
             block = re.sub(r"\(.*?\)", "", block_m.group(1), flags=re.DOTALL)
             for token in re.findall(r"\[[^]]+\]|[^,\s]+", block):
+                raw_token = token
+                # Skip pure string literals like 'AGREEMENT', "AGREEMENT"
+                if raw_token.strip().startswith("'") or raw_token.strip().startswith('"'):
+                    continue
                 token = strip_name(token.split(".")[-1]).upper()
                 if (
                     token
@@ -322,6 +309,12 @@ def extract_all(sql: str):
                 c = strip_name(c).upper().strip()
                 if c and re.match(r"^[A-Z_][A-Z0-9_]*$", c) and c not in SKIP_WORDS:
                     stmt_unresolved.add(c)
+
+        # Predicate columns (simple col = ...)
+        for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=", stmt, re.IGNORECASE):
+            col = strip_name(m.group(1)).upper()
+            if col not in SKIP_WORDS and not is_var(col):
+                stmt_unresolved.add(col)
 
         # Attach unresolved tokens for this statement
         if stmt_unresolved:
@@ -361,7 +354,6 @@ def extract_all(sql: str):
     dynamic = bool(re.search(r"EXEC\s*\(|EXECUTE\s*\(|sp_executesql", clean, re.IGNORECASE))
 
     return physical, dynamic, alias_issues
-
 
 def build_excel(all_results, output_path):
     wb = Workbook()
@@ -495,7 +487,7 @@ def build_excel(all_results, output_path):
                         schema,
                         base,
                         col,
-                        "alias.col / table.col",  # generic description
+                        "alias.col / table.col",
                         ops,
                     ]
                     for ci, v in enumerate(vals, 1):
@@ -656,7 +648,6 @@ def build_excel(all_results, output_path):
     wb.save(output_path)
     print(f"\nExcel report saved -> {output_path}\n")
 
-
 def process_sql(sql: str, source: str, forced_dialect: str):
     dialect = detect_dialect(sql)
     if forced_dialect:
@@ -675,7 +666,6 @@ def process_sql(sql: str, source: str, forced_dialect: str):
         )
         results.append((pname, source, dialect, physical, dynamic, alias_issues))
     return results
-
 
 def main():
     parser = argparse.ArgumentParser(description="SP Analyzer v5 -> Excel")
@@ -709,7 +699,6 @@ def main():
         sys.exit(1)
 
     build_excel(all_results, args.output)
-
 
 if __name__ == "__main__":
     main()
