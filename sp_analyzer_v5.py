@@ -357,7 +357,15 @@ def extract_all(sql: str):
                     )
                     physical["__UNRESOLVED__"]["columns"].add(c)
 
+    # After processing all statements, if there is exactly one physical table
+    # and there are unresolved columns, attach them to that single table.
+    real_tables = [k for k in physical.keys() if k != "__UNRESOLVED__"]
+    if len(real_tables) == 1 and "__UNRESOLVED__" in physical:
+        only_table = real_tables[0]
+        physical[only_table]["columns"].update(physical["__UNRESOLVED__"]["columns"])
+
     mapped = set()
+
     for k, info in physical.items():
         if k != "__UNRESOLVED__":
             mapped.update(info["columns"])
