@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Stored Procedure Analyzer v4
+Stored Procedure Analyzer v6
 - Physical tables ONLY — temp (#) and CTEs fully excluded from all output
 - Alias collision fix: alias scoped per-statement, not globally
 - Schema Breakdown tab: Schema → Tables → Columns
 - Deterministic regex engine, zero LLM
 
 Usage:
-    python sp_analyzer_v4.py                          # paste SP(s)
-    python sp_analyzer_v4.py my_sp.sql                # from file
-    python sp_analyzer_v4.py sp1.sql sp2.sql          # multiple files
-    python sp_analyzer_v4.py --dialect tsql my.sql    # force dialect
-    python sp_analyzer_v4.py --output report.xlsx my.sql
+    python sp_analyzer_v6.py                          # paste SP(s)
+    python sp_analyzer_v6.py my_sp.sql                # from file
+    python sp_analyzer_v6.py sp1.sql sp2.sql          # multiple files
+    python sp_analyzer_v6.py --dialect tsql my.sql    # force dialect
+    python sp_analyzer_v6.py --output report.xlsx my.sql
 """
 
 import re
@@ -385,7 +385,7 @@ def build_excel(all_results, output_path):
 
     ws.merge_cells("A1:G1")
     c = ws["A1"]
-    c.value = "Stored Procedure Analyzer v4 — Physical Tables Report"
+    c.value = "Stored Procedure Analyzer v6 — Physical Tables Report"
     c.font  = Font(bold=True, name="Arial", size=14, color=C_HEADER_FG)
     c.fill  = PatternFill("solid", fgColor=C_HEADER_BG)
     c.alignment = Alignment(horizontal="center", vertical="center")
@@ -678,10 +678,10 @@ def process_sql(sql, source, forced_dialect):
     return results
 
 def main():
-    parser = argparse.ArgumentParser(description="SP Analyzer v4 → Excel")
+    parser = argparse.ArgumentParser(description="SP Analyzer v6 → Excel")
     parser.add_argument("files",     nargs="*",  help=".sql files to process")
     parser.add_argument("--dialect", default="", help="Force dialect label")
-    parser.add_argument("--output",  default="sp_analysis_v4.xlsx")
+    parser.add_argument("--output",  default="sp_analysis_v6.xlsx")
     args = parser.parse_args()
 
     all_results = []
